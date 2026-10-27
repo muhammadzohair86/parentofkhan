@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: false;
+}
+
+@plugin "daisyui/theme" {
+  name: "khan";
+  default: true;
+  color-scheme: light;
+  --color-base-100: #f6f1e7;
+  --color-base-200: #efe8da;
+  --color-base-300: #ddd3bf;
+  --color-base-content: #151515;
+  --color-primary: #151515;
+  --color-primary-content: #f6f1e7;
+  --color-secondary: #151515;
+  --color-secondary-content: #f6f1e7;
+  --color-accent: #b8381f;
+  --color-accent-content: #f6f1e7;
+  --color-neutral: #151515;
+  --color-neutral-content: #f6f1e7;
+  --color-info: #151515;
+  --color-info-content: #f6f1e7;
+  --color-success: #2f6b3a;
+  --color-success-content: #f6f1e7;
+  --color-warning: #8a6100;
+  --color-warning-content: #f6f1e7;
+  --color-error: #b8381f;
+  --color-error-content: #f6f1e7;
+  --radius-selector: 0rem;
+  --radius-field: 0rem;
+  --radius-box: 0rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@theme {
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-sans: "Inter Tight", system-ui, sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+body { font-family: var(--font-sans); background: var(--color-base-100); color: var(--color-base-content); }
+
+:focus-visible { outline: 2px solid #151515; outline-offset: 3px; }
+
+.eyebrow { font-size: 0.7rem; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500; }
+.link-u { background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat; transition: background-size .25s; }
+.link-u:hover, .link-u:focus-visible { background-size: 100% 1px; }
+.btn-khan {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  background: #151515; color: #f6f1e7; padding: .9rem 1.5rem; font-size: .8rem;
+  letter-spacing: .12em; text-transform: uppercase; font-weight: 500; border: 1px solid #151515;
+  transition: background .2s, color .2s; cursor: pointer;
+}
+.btn-khan:hover:not(:disabled) { background: transparent; color: #151515; }
+.btn-khan:disabled { opacity: .4; cursor: not-allowed; }
+/* Inputs that draw their own clear (X) button must not also show the browser's built-in one. */
+.no-native-clear::-webkit-search-cancel-button,
+.no-native-clear::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }
+.no-native-clear::-ms-clear { display: none; }
+@keyframes pok-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.pok-marquee { animation: pok-marquee linear infinite; will-change: transform; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.field { width: 100%; background: transparent; border: 1px solid #15151555; padding: .8rem .9rem; font-size: .95rem; }
+.field:focus { border-color: #151515; outline: none; box-shadow: 0 0 0 1px #151515; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
