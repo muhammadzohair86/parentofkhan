@@ -3,6 +3,9 @@
   command = "npm --prefix server install --include=dev && npm --prefix client install --include=dev && npm run build"
   publish = "client/dist"
 
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "NODE_ENV,SAFEPAY_ENV"
+
 [functions]
   directory = "server/netlify/functions"
   external_node_modules = ["express", "serverless-http"]
