@@ -1,0 +1,11 @@
+# Netlify: this file is copied into the build output (dist/) by Vite. It makes direct visits and page refreshes work for every
+# storefront and admin route (/shop, /product/..., /checkout, /order/..., /admin/...). Without a rule like this Netlify answers
+# those URLs with its own 404 page, because the files do not exist: the app is a single-page app.
+#
+# If you ALREADY proxy the API through Netlify (i.e. the site calls /api/... on its own domain and VITE_API_URL is NOT set), the proxy
+# rule MUST stay ABOVE the fallback line, otherwise /api/* would be answered with index.html. Example (replace the host):
+#   /api/*  https://YOUR-BACKEND-HOST/api/:splat  200
+#
+# If you use VITE_API_URL (the browser calls the backend directly), you do not need an /api rule.
+
+/*    /index.html   200

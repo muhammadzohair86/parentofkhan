@@ -1,6 +1,9 @@
 import { Product } from "../models/Product.js";
 import { Category } from "../models/Category.js";
 import { Order } from "../models/Order.js";
+import { ContactMessage } from "../models/ContactMessage.js";
+import { visitorStats } from "./analyticsController.js";
+import { fillSeries } from "../lib/analytics.js";
 import { hasPermission } from "../lib/permissions.js";
 
 // Real counts only, and only for the sections this admin may view.
@@ -24,6 +27,14 @@ export async function dashboard(req, res) {
     ]).then(([total, pending, inProgress, paid]) => {
       // Revenue appears only when paid orders really exist. Safepay SANDBOX payments are test money, so they are never counted as revenue.
       out.orders = { total, pending, inProgress, revenue: paid[0] ? { paidOrders: paid[0].count, amount: Math.round(paid[0].amount * 100) / 100 } : null };
+    }));
+  }
+  if (hasPermission(u, "messages.view")) {
+    jobs.push(Promise.all([ContactMessage.countDocuments({ status: "new" }), ContactMessage.countDocuments({})]).then(([unread, total]) => { out.messages = { unread, total }; }));
+  }
+  if (hasPermission(u, "analytics.view")) {
+    jobs.push(visitorStats().then((v) => {
+      out.visitors = { visitors: v.visitors, pageViews: v.pageViews, last14: fillSeries(v.perDayVisitors, v.today, 14).map((d, i) => ({ ...d, pageViews: fillSeries(v.perDayViews, v.today, 14)[i].value })) };
     }));
   }
   await Promise.all(jobs);

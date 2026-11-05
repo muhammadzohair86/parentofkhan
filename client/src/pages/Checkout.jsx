@@ -6,13 +6,16 @@ import { useCart, cartSubtotal } from "../store/useCart.js";
 import { useTitle } from "../hooks/useAsync.js";
 import { useDebounce } from "../hooks/useDebounce.js";
 import { getShippingOptions, quoteCheckout } from "../services/shipping.js";
-import { getPaymentConfig, startPayment, newCheckoutToken, isSafepayUrl } from "../services/payments.js";
+import { getPaymentConfig, startPayment, createWhatsappOrder, newCheckoutToken, isSafepayUrl, isWhatsappUrl } from "../services/payments.js";
 import { rememberOrder } from "../lib/recentOrders.js";
 import { money, formatAmount, pkr } from "../lib.js";
 
-// Checkout, shipping part only. The customer reviews the cart, picks a destination and address, and sees the courier, the
-// shipping charge and the totals. EVERY figure comes from POST /api/checkout/quote: the server prices the cart from the
-// database and calculates shipping itself (including Free Shipping). There is no payment step and no order is created here.
+// Checkout. The customer reviews the cart, picks a destination and address, and sees the courier, the shipping charge and the totals.
+// EVERY figure comes from POST /api/checkout/quote: the server prices the cart from the database and calculates shipping itself.
+//
+// Payment: while online gateways are switched off on the server (the current phase) the ONLY option is WhatsApp: "Complete Order on WhatsApp"
+// saves the order first and only then opens WhatsApp with a pre-filled message. The Safepay path below is kept and is shown only when the
+// server reports it as enabled (ENABLE_ONLINE_PAYMENTS=true plus working credentials): it is never offered otherwise.
 //
 // Destinations are not hardcoded: the country list is built from GET /api/shipping/options, i.e. the domestic service (if enabled)
 // plus the international destinations an admin has enabled and priced. A quote is only requested once the destination is complete
@@ -123,7 +126,11 @@ export default function Checkout() {
     window.addEventListener("focus", loadPayCfg);
     return () => window.removeEventListener("focus", loadPayCfg);
   }, [loadPayCfg]);
-  const payOff = payCfg.status === "ready" && !payCfg.enabled;       // the ONLY availability state that disables Pay: the server said so
+  const payOff = payCfg.status === "ready" && !payCfg.enabled;       // the server said online payment is off (the current phase)
+  const waOff = payCfg.status === "ready" && payCfg.whatsapp?.enabled === false; // the server said WhatsApp checkout isn't set up
+  const onlineOffered = payCfg.status === "ready" && !!payCfg.enabled; // online gateway is only ever shown when the server says it is enabled
+  const [pick, setPick] = useState("whatsapp");
+  const method = onlineOffered && !(waOff) ? pick : onlineOffered ? "online" : "whatsapp";
   const inFlight = useRef(false);                                    // a ref (not state) so two rapid clicks can't both slip through before a re-render
   const [customer, setCustomer] = useState({ name: "", email: "", phone: "" });
   const setC = (k, v) => setCustomer((s) => ({ ...s, [k]: v }));
@@ -181,18 +188,23 @@ export default function Checkout() {
   }, [key, retry, loadOptions]);
 
   const quotePending = ready && (key === null || q.status === "loading");   // a shipping quote for the current selection is still on its way
-  const canPay = !payOff && q.status === "ok" && q.data?.total != null && live.length > 0 && !(ready && key === null);
-  // Why Pay is off, in words (shown under the button). null when it is on or while a payment is being started.
-  const whyOff = canPay || busy ? null
-    : payOff ? "off"
-    : live.length === 0 ? "Add an available item to your cart to pay."
+  const canOrder = q.status === "ok" && q.data?.total != null && live.length > 0 && !(ready && key === null);
+  const canPay = !payOff && canOrder;     // online gateway (only reachable when the server enabled it)
+  const canWa = !waOff && canOrder;       // WhatsApp checkout
+  const canGo = method === "whatsapp" ? canWa : canPay;
+  // Why the button is off, in words (shown under it). null when it is on or while an order is being saved.
+  const whyOff = canGo || busy ? null
+    : method === "whatsapp" && waOff ? "off"
+    : method === "online" && payOff ? "off"
+    : live.length === 0 ? "Add an available item to your cart to order."
     : !ready ? (idle || "Choose where to ship so we can calculate shipping.")
     : quotePending ? "Calculating shipping…"
     : q.status === "error" ? "Shipping couldn’t be calculated for this destination. See the shipping method above."
-    : q.data?.total == null ? "We can’t take payment for this order yet. Please contact us."
+    : q.data?.total == null ? "We can’t take this order yet. Please contact us."
     : "Complete the details above to continue.";
-  const pay = async () => {
-    if (inFlight.current || busy || !canPay) return;
+
+  const submit = async (kind) => {
+    if (inFlight.current || busy || !(kind === "whatsapp" ? canWa : canPay)) return;
     const errs = {};
     if (customer.name.trim().length < 2) errs["customer.name"] = "Enter your full name.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(customer.email.trim())) errs["customer.email"] = "Enter a valid email address.";
@@ -206,12 +218,21 @@ export default function Checkout() {
       customer: { name: customer.name, email: customer.email, phone: customer.phone },
       address: { line1: a.line1, line2: a.line2, city: a.city, region: a.region, postalCode: a.postalCode },
     };
-    const fp = JSON.stringify(body);
-    if (sent.current.fp !== fp) sent.current = { fp, token: newCheckoutToken() }; // changed details = a new checkout; unchanged = the SAME one (idempotent)
+    const fp = JSON.stringify({ kind, body });
+    if (sent.current.fp !== fp) sent.current = { fp, token: newCheckoutToken() }; // changed details = a new checkout; unchanged = the SAME one (idempotent: no duplicate order)
+    const payload = { ...body, clientRequestId: sent.current.token,
+      submitted: { shippingAmount: q.data.shipping.amount, subtotal: q.data.subtotal, total: q.data.total } }; // the amounts shown here: the server refuses them if they differ from its own
     try {
-      const r = await startPayment({ ...body, clientRequestId: sent.current.token,
-        submitted: { shippingAmount: q.data.shipping.amount, subtotal: q.data.subtotal, total: q.data.total } }); // the amounts shown here: the server refuses them if they differ from its own
-      rememberOrder(r.orderNumber, sent.current.token); // so "Track Order" can reopen it later, on this device
+      if (kind === "whatsapp") {
+        const r = await createWhatsappOrder(payload); // resolves only after the order is SAVED
+        rememberOrder(r.orderNumber, sent.current.token); // so "Track Order" can reopen it later, on this device
+        useCart.getState().clear();                       // the cart is now an order: keeping it would invite a second, duplicate order
+        navigate(r.orderPath, { replace: true });         // back from WhatsApp lands on the order page (with a button to reopen WhatsApp)
+        if (r.whatsappUrl && isWhatsappUrl(r.whatsappUrl)) window.location.assign(r.whatsappUrl); // the customer reviews and sends the message themselves
+        return;
+      }
+      const r = await startPayment(payload);
+      rememberOrder(r.orderNumber, sent.current.token);
       if (r.status === "paid") { navigate(`/order/${r.orderNumber}/${sent.current.token}`); return; }
       if (!isSafepayUrl(r.redirectUrl)) throw new Error("Unexpected payment response");
       window.location.assign(r.redirectUrl); // stay "busy" while the browser leaves for Safepay
@@ -220,11 +241,14 @@ export default function Checkout() {
       if (e?.code === "VALIDATION_ERROR" && Array.isArray(e.details)) {
         setFieldErrs(Object.fromEntries(e.details.filter((d) => d.path).map((d) => [d.path, d.message])));
         setPayError("Please check the highlighted fields.");
-      } else if (e?.code === "TOTALS_MISMATCH") { setPayError("The shipping charge or total changed. We've refreshed your order: please check the new total and press Pay again."); setRetry((n) => n + 1); }
-      else if (e?.code === "PAYMENT_IN_PROGRESS") setPayError("Your payment is already being set up. Please wait a moment, then press Pay again.");
+      } else if (e?.code === "TOTALS_MISMATCH") { setPayError("The shipping charge or total changed. We've refreshed your order: please check the new total and try again."); setRetry((n) => n + 1); }
+      else if (e?.code === "WHATSAPP_NOT_CONFIGURED") { setPayError(e.message); loadPayCfg(); }
+      else if (e?.code === "CHECKOUT_CHANGED") { sent.current = { fp: "", token: "" }; setPayError(e.message); }
+      else if (e?.code === "PAYMENT_IN_PROGRESS") setPayError("Your payment is already being set up. Please wait a moment, then try again.");
       else if (e?.code === "PAYMENTS_UNAVAILABLE") { setPayError(e.message); loadPayCfg(); } // the server says payments are off: refresh what we show
       else if (["PAYMENT_PROVIDER_ERROR", "PAYMENT_SETUP_ERROR"].includes(e?.code)) setPayError([e.message, e.details?.[0]?.message].filter(Boolean).join(" ")); // details only exist in development
       else if (e?.status && e.status < 500 && e.message) setPayError(e.message);
+      else if (kind === "whatsapp") setPayError("We couldn't save your order, so WhatsApp was not opened. Nothing was charged. Please try again: if the first attempt did reach us, you won't get a duplicate order.");
       else setPayError("We couldn't start the payment. Nothing was charged. Please try again in a moment.");
     }
   };
@@ -310,26 +334,48 @@ export default function Checkout() {
           <div className={settling ? "opacity-50" : ""}><Totals q={q} fallbackSubtotal={cartTotal} /></div>
           <div className="space-y-3">
             <h2 className="eyebrow">Payment</h2>
-            <div className="border border-base-300 p-3 text-sm">
-              <p className="font-medium">Safepay: pay online by card</p>
-              {payCfg?.testMode && <p className="mt-1 text-xs opacity-70">Test mode: payments use Safepay's sandbox. No real money is charged.</p>}
-            </div>
-            {payError && <p role="alert" className="border border-error p-3 text-sm text-error">{payError}</p>}
-            {payOff && (
-              <div role="status" className="space-y-2 border border-base-300 p-3 text-xs">
-                <p>Online payment isn’t available right now. Please try again later.</p>
-                {payCfg.diagnostics?.length > 0 && ( // only sent by a development server: names the exact setting to fix
-                  <div className="opacity-80"><p className="font-medium">Developer note (development mode only):</p><ul className="list-disc pl-5">{payCfg.diagnostics.map((d, i) => <li key={i}>{d}</li>)}</ul></div>
-                )}
-                <button type="button" className="link-u" onClick={loadPayCfg}>Check again</button>
+            {onlineOffered && !waOff && (
+              <div role="radiogroup" aria-label="Payment method" className="grid grid-cols-2 gap-2 text-sm">
+                {[["whatsapp", "WhatsApp"], ["online", "Safepay (card)"]].map(([k, label]) => (
+                  <button key={k} type="button" role="radio" aria-checked={method === k} onClick={() => { setPayError(""); setPick(k); }}
+                    className={`border p-3 text-left ${method === k ? "border-black font-medium" : "border-base-300 opacity-70"}`}>{label}</button>
+                ))}
               </div>
             )}
-            {payCfg.status === "error" && <p role="status" className="text-xs opacity-70">We couldn’t check whether online payment is available. You can still try to pay. <button type="button" className="link-u" onClick={loadPayCfg}>Check again</button></p>}
-            <button className="btn-khan w-full" disabled={!canPay || busy} onClick={pay} aria-busy={busy}>
-              {busy ? "Opening Safepay…" : q.data?.total != null ? `Pay ${money(q.data.total)} with Safepay` : "Pay with Safepay"}
-            </button>
-            {whyOff && whyOff !== "off" && <p role="status" className="text-xs opacity-70">{whyOff}</p>}
-            <p className="text-xs opacity-60">You’ll be taken to Safepay’s secure page to pay{q.data?.total != null ? ` ${money(q.data.total)} (USD)` : ""}. We never see your card details.</p>
+            {method === "whatsapp" ? (
+              <>
+                <div className="space-y-2 border border-base-300 p-3 text-sm">
+                  <p className="font-medium">Order and pay via WhatsApp</p>
+                  <p className="text-xs opacity-70">We save your order, then open WhatsApp with a message ready to send. Send it and we’ll confirm your order and share payment instructions. Nothing is charged online, and your order isn’t confirmed or paid until we reply.</p>
+                </div>
+                {payError && <p role="alert" className="border border-error p-3 text-sm text-error">{payError}</p>}
+                {waOff && (
+                  <div role="status" className="space-y-2 border border-base-300 p-3 text-xs">
+                    <p>WhatsApp ordering isn’t available right now. Please try again later or <Link to="/contact" className="link-u">contact us</Link>.</p>
+                    <button type="button" className="link-u" onClick={loadPayCfg}>Check again</button>
+                  </div>
+                )}
+                {payCfg.status === "error" && <p role="status" className="text-xs opacity-70">We couldn’t check ordering availability. You can still try. <button type="button" className="link-u" onClick={loadPayCfg}>Check again</button></p>}
+                <button className="btn-khan w-full" disabled={!canWa || busy} onClick={() => submit("whatsapp")} aria-busy={busy}>
+                  {busy ? "Saving your order…" : "Complete Order on WhatsApp"}
+                </button>
+                {whyOff && whyOff !== "off" && <p role="status" className="text-xs opacity-70">{whyOff}</p>}
+                <p className="text-xs opacity-60">Your order is saved first, then WhatsApp opens with a pre-filled message{q.data?.total != null ? ` for ${money(q.data.total)} (USD)` : ""}. You review it and press send yourself.</p>
+              </>
+            ) : (
+              <>
+                <div className="border border-base-300 p-3 text-sm">
+                  <p className="font-medium">Safepay: pay online by card</p>
+                  {payCfg?.testMode && <p className="mt-1 text-xs opacity-70">Test mode: payments use Safepay's sandbox. No real money is charged.</p>}
+                </div>
+                {payError && <p role="alert" className="border border-error p-3 text-sm text-error">{payError}</p>}
+                <button className="btn-khan w-full" disabled={!canPay || busy} onClick={() => submit("online")} aria-busy={busy}>
+                  {busy ? "Opening Safepay…" : q.data?.total != null ? `Pay ${money(q.data.total)} with Safepay` : "Pay with Safepay"}
+                </button>
+                {whyOff && whyOff !== "off" && <p role="status" className="text-xs opacity-70">{whyOff}</p>}
+                <p className="text-xs opacity-60">You’ll be taken to Safepay’s secure page to pay{q.data?.total != null ? ` ${money(q.data.total)} (USD)` : ""}. We never see your card details.</p>
+              </>
+            )}
           </div>
         </aside>
       </div>

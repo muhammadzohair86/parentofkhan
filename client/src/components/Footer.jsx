@@ -9,8 +9,8 @@ const links = [
   ["Contact", "/contact"],
   ["Terms & Conditions", "/policies/terms"],
   ["Privacy Policy", "/policies/privacy"],
-  ["Refund Policy", "/policies/refund"],
-  ["Shipping Policy", "/policies/shipping"],
+  ["Refund & Return Policy", "/policies/refund"],
+  ["Shipping & Delivery Policy", "/policies/shipping"],
 ];
 
 function Newsletter() {

@@ -18,12 +18,14 @@ const money2 = (n) => Math.round(Number(n) * 100) / 100;
 
 // Customer-friendly timeline from the SAVED history only. Descriptions are fixed text per event type: the admin's notes and names are never used.
 // A legacy order with no history gets an empty timeline (nothing is invented); the current status is shown separately.
-export function buildTimeline(history) {
+export function buildTimeline(history, { whatsapp = false } = {}) {
   const out = [];
   for (const h of Array.isArray(history) ? history : []) {
     const kind = h.kind || "status"; // entries saved before `kind` existed are status changes
     let e = null;
-    if (kind === "status" && STATUS_TEXT[h.to]) e = { type: h.to, ...STATUS_TEXT[h.to] };
+    if (kind === "status" && h.to === "pending" && whatsapp) e = { type: "pending", label: "Order created", text: "Your order was created and is waiting for confirmation on WhatsApp." };
+    else if (kind === "status" && STATUS_TEXT[h.to]) e = { type: h.to, ...STATUS_TEXT[h.to] };
+    else if (kind === "payment" && String(h.key || "").startsWith("payment:manual:reverted")) e = { type: "payment_reverted", label: "Payment status updated", text: "Your payment status was updated and is being re-checked." };
     else if (kind === "payment") e = { type: h.key === "payment:refunded" ? "refunded" : "paid", ...(h.key === "payment:refunded" ? PAYMENT_EVENT.refunded : PAYMENT_EVENT.paid) };
     else if (kind === "shipment") e = { type: "tracking", label: "Tracking updated", text: "Courier tracking details were added or updated." };
     if (e && h.at) out.push({ ...e, at: iso(h.at) });
@@ -50,12 +52,14 @@ export function customerOrderView(order, latestPayment = null) {
   const sd = order.shippingDetails?.courier ? order.shippingDetails : null;
   const free = !!sd?.freeShipping || (!sd && !(order.shipping > 0));
   const paymentStatus = customerPaymentStatus({ paymentStatus: order.payment?.status || "unpaid" }, latestPayment);
+  const whatsapp = order.payment?.method === "whatsapp"; // paid and confirmed by hand over WhatsApp
   const items = (order.items || []).map((i) => ({ name: i.name, color: i.color, size: i.size, quantity: i.quantity, unitPrice: money2(i.unitPrice), lineTotal: money2(i.unitPrice * i.quantity), image: i.image || null }));
   return {
     orderNumber: order.orderNumber,
     placedAt: iso(order.createdAt),
     status: order.status,
-    statusLabel: STATUS_TEXT[order.status]?.label || order.status,
+    statusLabel: whatsapp && order.status === "pending" ? "Awaiting WhatsApp confirmation" : STATUS_TEXT[order.status]?.label || order.status,
+    paymentMethod: whatsapp ? "whatsapp" : "online",
     paymentStatus,
     currency: order.currency || "USD",
     items,
@@ -64,7 +68,7 @@ export function customerOrderView(order, latestPayment = null) {
     shipping: { method: sd?.courier || null, destination: sd?.destinationName || null, free, amount: free ? 0 : sd ? sd.amount : money2(order.shipping), currency: sd?.currency || order.currency || "USD", deliveryEstimate: sd?.deliveryEstimate || null },
     total: money2(order.total),
     shipment: customerShipment(order),
-    timeline: buildTimeline(order.statusHistory),
+    timeline: buildTimeline(order.statusHistory, { whatsapp }),
     testMode: order.payment?.environment === "sandbox",
   };
 }
@@ -73,7 +77,8 @@ export function customerOrderView(order, latestPayment = null) {
 export function customerOrderRow(order) {
   const p = order.payment?.status || "unpaid";
   return {
-    orderNumber: order.orderNumber, placedAt: iso(order.createdAt), status: order.status, statusLabel: STATUS_TEXT[order.status]?.label || order.status,
+    orderNumber: order.orderNumber, placedAt: iso(order.createdAt), status: order.status,
+    statusLabel: order.payment?.method === "whatsapp" && order.status === "pending" ? "Awaiting WhatsApp confirmation" : STATUS_TEXT[order.status]?.label || order.status,
     paymentStatus: p === "paid" ? "paid" : p === "refunded" ? "refunded" : p === "failed" ? "failed" : "pending",
     total: money2(order.total), currency: order.currency || "USD", itemCount: (order.items || []).reduce((n, i) => n + i.quantity, 0),
   };

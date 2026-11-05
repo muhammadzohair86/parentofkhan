@@ -38,10 +38,14 @@ const tokenMatches = (token, hash) => {
 };
 
 // `diagnostics` (development only): add a short, secret-free reason (HTTP status / error kind) to provider errors so you can see WHAT failed.
-export function createPaymentService({ repo, safepay, config, priceCart, publicSiteUrl, now = () => new Date(), log = () => {}, diagnostics = false }) {
+export function createPaymentService({ repo, safepay, config, priceCart, publicSiteUrl, now = () => new Date(), log = () => {}, diagnostics = false, whatsappLink = () => null }) {
   const enabled = !!(safepay && config);
   const assertEnabled = () => {
     if (!enabled) throw new ApiError(503, "PAYMENTS_UNAVAILABLE", "Online payment isn't available right now. Please try again later.");
+  };
+  // A WhatsApp order is paid by hand (instructions come from the store over WhatsApp): it must never get an online payment session.
+  const assertOnlineOrder = (order) => {
+    if (order.paymentMethod === "whatsapp") throw new ApiError(409, "PAYMENT_METHOD_WHATSAPP", "This order is paid through WhatsApp. Please message us there to complete payment.");
   };
   // Provider problems become one generic message; the detail (HTTP status, kind) goes to the server log only. Never a secret.
   const redact = (text) => { // belt and braces: no credential value can ever leave through a message
@@ -152,9 +156,13 @@ export function createPaymentService({ repo, safepay, config, priceCart, publicS
   // `order` (domain, for payment decisions) + `doc` (full record, only ever passed through customerOrderView's allowlist).
   const publicView = (order, doc, latest, extra = {}) => {
     const status = customerPaymentStatus(order, latest);
+    const manual = order.paymentMethod === "whatsapp"; // WhatsApp orders are paid and verified by hand: there is no online session to retry
     return {
       orderNumber: order.orderNumber, status, total: order.total, currency: order.paymentCurrency,
-      canRetry: ["failed", "cancelled", "expired", "unpaid"].includes(status),
+      paymentMethod: manual ? "whatsapp" : "online",
+      // The link is rebuilt from the SAVED order (reference, items, totals only) so a customer can reopen WhatsApp later. Only while it is still useful.
+      whatsappUrl: manual && doc && status !== "paid" && doc.status === "pending" ? whatsappLink(doc) : null,
+      canRetry: enabled && !manual && ["failed", "cancelled", "expired", "unpaid"].includes(status),
       testMode: order.paymentEnvironment === "sandbox", ...extra,
       order: doc ? customerOrderView(doc, latest) : null, // the customer-safe order: items, totals, shipment, timeline (see orderView.js)
     };
@@ -229,11 +237,13 @@ export function createPaymentService({ repo, safepay, config, priceCart, publicS
     async retryPayment({ orderNumber, token }) {
       assertEnabled();
       const order = await authorize(orderNumber, token);
+      assertOnlineOrder(order);
       return sessionResponse(order, `/order/${order.orderNumber}/${token}`);
     },
     async retryPaymentForUser({ orderNumber, userId }) {
       assertEnabled();
       const order = await authorizeUser(orderNumber, userId);
+      assertOnlineOrder(order);
       return sessionResponse(order, `/account/orders/${order.orderNumber}`);
     },
 

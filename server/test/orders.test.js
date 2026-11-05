@@ -73,7 +73,7 @@ test("customer view: an explicit allowlist: nothing private appears anywhere in 
     "SECRET-SKU", "SECRET-TRACKER-REF", "SECRET-INTERNAL-NOTE", "SECRET-NOTE", "SECRET-ADMIN-ID", "Admin Alice", "System (Safepay)", "7.77", "123.456", "nls_domestic_tariff", "production", "Ayesha", "checkoutTokenHash", "_id"]) {
     assert.ok(!json.includes(secret), `leaked: ${secret}`);
   }
-  assert.deepEqual(Object.keys(view).sort(), ["currency", "itemCount", "items", "orderNumber", "paymentStatus", "placedAt", "shipment", "shipping", "status", "statusLabel", "subtotal", "testMode", "timeline", "total"]);
+  assert.deepEqual(Object.keys(view).sort(), ["currency", "itemCount", "items", "orderNumber", "paymentMethod", "paymentStatus", "placedAt", "shipment", "shipping", "status", "statusLabel", "subtotal", "testMode", "timeline", "total"]);
   assert.deepEqual(Object.keys(view.items[0]).sort(), ["color", "image", "lineTotal", "name", "quantity", "size", "unitPrice"]);
   assert.deepEqual(Object.keys(view.shipping).sort(), ["amount", "currency", "deliveryEstimate", "destination", "free", "method"]);
   assert.deepEqual(Object.keys(view.shipment).sort(), ["awaitingTracking", "carrier", "dispatchedAt", "estimatedDelivery", "trackingNumber", "trackingUrl"]);

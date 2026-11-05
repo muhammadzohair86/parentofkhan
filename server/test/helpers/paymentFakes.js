@@ -40,7 +40,7 @@ export function fakeRepo() {
   const orders = new Map(), payments = [], events = new Map(); let seq = 0;
   const tick = () => new Promise((r) => setImmediate(r)); // yield so concurrent requests really interleave
   const out = (o) => o && ({ id: o._id, orderNumber: o.orderNumber, tokenHash: o.checkoutTokenHash, fingerprint: o.checkoutFingerprint, total: o.total,
-    paymentStatus: o.payment.status, paymentReference: o.payment.reference, paymentAmountMinor: o.payment.amountMinor, paymentCurrency: o.payment.currency, paymentEnvironment: o.payment.environment, userId: o.userId ?? null, emailHash: o.customer?.email ? sha(String(o.customer.email).trim().toLowerCase()) : "" });
+    paymentStatus: o.payment.status, paymentMethod: o.payment.method || "", paymentReference: o.payment.reference, paymentAmountMinor: o.payment.amountMinor, paymentCurrency: o.payment.currency, paymentEnvironment: o.payment.environment, userId: o.userId ?? null, emailHash: o.customer?.email ? sha(String(o.customer.email).trim().toLowerCase()) : "" });
   const pout = (p) => p && ({ id: p._id, orderId: p.order, orderNumber: p.orderNumber, tracker: p.tracker, status: p.status, createdAt: p.createdAt, lastCheckedAt: p.lastCheckedAt, paidAt: p.paidAt });
   const dup = (field) => Object.assign(new Error("dup"), { code: "DUPLICATE_KEY", field });
   return {

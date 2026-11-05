@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { parseSafepayConfig } from "../lib/safepayConfig.js";
+import { parseWhatsappNumber } from "../lib/whatsapp.js";
 
 const PLACEHOLDER = /your_mongodb|<password>|<db_password>|<username>/i;
 
@@ -57,5 +58,12 @@ export function loadEnv() {
   // reasons are reported by variable NAME at start-up. Secrets stay on the server and are never exposed.
   const safepay = parseSafepayConfig(process.env);
 
-  return { nodeEnv, isProd: nodeEnv === "production", mongoUri, publicSiteUrl, safepay, port, clientOrigins, trustProxy, uploadDir, publicUploadBase, uploadMaxBytes, cloudinary };
+  // Online payment gateways (Safepay) are OFF unless ENABLE_ONLINE_PAYMENTS=true. The integration stays in the code; this switch decides whether
+  // customers can reach it. Current phase: WhatsApp checkout only.
+  const onlinePaymentsEnabled = String(process.env.ENABLE_ONLINE_PAYMENTS || "").trim().toLowerCase() === "true";
+
+  // WhatsApp Click-to-Chat checkout. The number is never invented: unset/invalid leaves WhatsApp checkout switched off (reported at start-up).
+  const whatsapp = parseWhatsappNumber(process.env.WHATSAPP_BUSINESS_NUMBER);
+
+  return { onlinePaymentsEnabled, whatsapp, nodeEnv, isProd: nodeEnv === "production", mongoUri, publicSiteUrl, safepay, port, clientOrigins, trustProxy, uploadDir, publicUploadBase, uploadMaxBytes, cloudinary };
 }

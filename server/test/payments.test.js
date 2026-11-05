@@ -697,7 +697,7 @@ test("checkout availability: a FAILED availability check never disables Pay; onl
 test("the webhook route is mounted BEFORE express.json (raw body preserved) and uses express.raw", async () => {
   const app = await src("../src/app.js");
   assert.ok(app.indexOf('app.use("/api/webhooks"') > 0 && app.indexOf('app.use("/api/webhooks"') < app.indexOf("express.json({"), "webhook must be mounted before the JSON parser");
-  assert.ok(app.indexOf('app.use("/api/webhooks"') < app.indexOf("rateLimit({ windowMs: 60_000, limit: 300"));
+  assert.ok(app.indexOf('app.use("/api/webhooks"') < app.indexOf("limiter(60_000, 300"));
   assert.match(await src("../src/routes/paymentRoutes.js"), /express\.raw\(/);
   assert.match(await src("../src/routes/paymentRoutes.js"), /checkout\.post\("\/pay", limiter\(.*validate\(\{ body: payBody \}\)/);
 });

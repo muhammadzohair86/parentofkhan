@@ -7,13 +7,13 @@ import { PaymentEvent } from "../models/PaymentEvent.js";
 import { OrderAccess } from "../models/OrderAccess.js";
 import { LookupThrottle } from "../models/LookupThrottle.js";
 import crypto from "node:crypto";
-import { placedEntry, paymentPaidEntry, paymentRefundedEntry } from "./orderHistory.js";
+import { placedEntry, paymentPaidEntry, paymentRefundedEntry, manualPaymentEntry } from "./orderHistory.js";
 
 const id = (x) => String(x);
 const sha = (t) => crypto.createHash("sha256").update(t).digest("hex");
 const orderOut = (o) => o && ({
   id: id(o._id), orderNumber: o.orderNumber, tokenHash: o.checkoutTokenHash || "", fingerprint: o.checkoutFingerprint || "", total: o.total,
-  paymentStatus: o.payment?.status || "unpaid", paymentReference: o.payment?.reference || "",
+  paymentStatus: o.payment?.status || "unpaid", paymentMethod: o.payment?.method || "", paymentReference: o.payment?.reference || "",
   paymentAmountMinor: o.payment?.amountMinor, paymentCurrency: o.payment?.currency || o.currency, paymentEnvironment: o.payment?.environment || "",
   userId: o.user ? id(o.user) : null,
   emailHash: o.customer?.email ? sha(String(o.customer.email).trim().toLowerCase()) : "", // lets guest lookup compare emails without ever returning the address
@@ -36,7 +36,7 @@ export const paymentRepo = {
         orderNumber: d.orderNumber, checkoutTokenHash: d.tokenHash, checkoutFingerprint: d.fingerprint, user: d.userId || null,
         customer: d.customer, shippingAddress: d.shippingAddress, items: d.items, subtotal: d.subtotal, shipping: d.shipping ?? 0,
         shippingDetails: d.shippingDetails, discount: d.discount, total: d.total, currency: d.currency, payment: d.payment,
-        status: "pending", statusHistory: [placedEntry()],
+        status: "pending", statusHistory: [placedEntry(new Date(), d.placedNote ? { note: d.placedNote } : undefined)],
       }).save();
       return orderOut(o.toObject());
     } catch (e) { throw dup(e) || e; }
@@ -59,6 +59,15 @@ export const paymentRepo = {
     const update = { $set: { "payment.status": status } };
     if (status === "refunded") update.$push = { statusHistory: paymentRefundedEntry() }; // same atomic update as the change: a repeat finds the status already moved
     await Order.updateOne({ _id: orderId, "payment.status": { $in: from } }, update);
+  },
+
+  // Manual payment verification by an authorised admin, ONLY for orders paid outside any gateway (WhatsApp checkout). One conditional update:
+  // the order must be a WhatsApp order, not cancelled, and currently in the opposite payment state, so a double click or two admins cannot apply it twice.
+  // Returns the updated order document, or null when the conditions were not met. Gateway (Safepay) orders can never be changed here.
+  async setManualPayment(orderId, { paid, reference = "", by = null, byName = "", note = "", now = new Date() }) {
+    const filter = { _id: orderId, "payment.method": "whatsapp", "payment.status": paid ? "unpaid" : "paid", status: { $ne: "cancelled" } };
+    const set = paid ? { "payment.status": "paid", "payment.paidAt": now, "payment.reference": reference } : { "payment.status": "unpaid", "payment.paidAt": null, "payment.reference": "" };
+    return Order.findOneAndUpdate(filter, { $set: set, $push: { statusHistory: manualPaymentEntry({ paid, by, byName, note, at: now }) } }, { new: true }).lean();
   },
 
   // ---- customer order access (read side) ----

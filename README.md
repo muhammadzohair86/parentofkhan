@@ -199,3 +199,34 @@ Optionally `PUBLIC_SITE_URL` (where Safepay sends the customer back; defaults to
 **Tracking links:** no official NLS Xpress tracking URL format was found, so none is assumed: the link is whatever you enter per order. With only a number, customers are told to use the courier's official tracking service.
 
 **Email notifications are not implemented**: the project has no email service configured (see the hand-over notes for what is needed).
+
+
+## WhatsApp checkout, announcement bar and production reliability (latest update)
+
+### WhatsApp checkout (the only customer checkout in this phase)
+- **Where to enter your number:** `server/.env` (or your backend host's environment variables): `WHATSAPP_BUSINESS_NUMBER`, international format, digits only, no `+`, spaces or leading 0 (Pakistan `0300 1234567` -> `923001234567`). Restart the API. Until it is set, the checkout button reports "not available" and **no order is created**. The start-up log says whether WhatsApp checkout is on.
+- **Flow:** "Complete Order on WhatsApp" -> `POST /api/checkout/whatsapp` (same body, validation, server-side pricing and shipping as before) -> the order is **saved first** (`payment.method = "whatsapp"`, `payment.status = "unpaid"`, `status = "pending"`, shipping snapshot included) -> only then the server returns a free `wa.me` link built from the *saved* order (reference, items with size/colour/quantity, shipping, total, currency; no e-mail, phone, address or tokens). The customer reviews and sends the message themselves. If saving fails, nothing opens.
+- **No duplicates:** the browser's `clientRequestId` is an idempotency key: double clicks and retries return the same order.
+- **Statuses:** reuses `pending` + `unpaid`. Admin shows "awaiting WhatsApp confirmation"; customers see "Awaiting WhatsApp confirmation" and the order page has an "Open WhatsApp" button (the link is rebuilt from the saved order). Orders stay in the admin list even if the message is never sent. Nothing is ever marked paid automatically.
+- **Manual payment verification:** Admin > Orders > an order > "Mark payment received" (permission `orders.update`, WhatsApp orders only, recorded in history with the admin's name, optional admin-only reference). "Undo" corrects a mistake. Gateway orders cannot be changed this way.
+
+### Online gateways (Safepay) are preserved but OFF
+- Controlled by `ENABLE_ONLINE_PAYMENTS` (server). Anything other than exactly `true` = off: no Safepay client is created, `/api/checkout/pay` and retry answer "unavailable", webhooks are not processed, the checkout shows no online option, and the footer shows no payment-logo methods.
+- **Re-enable later:** set `ENABLE_ONLINE_PAYMENTS=true`, keep/fill the `SAFEPAY_*` variables, restart the API. The checkout then offers a Safepay option next to WhatsApp automatically. All Safepay code, routes, models, scripts and variables are untouched. Production payments remain refused by design.
+
+### Announcement bar
+- Stored in the existing single `sitesettings` document (`key: "site"`) as `announcement: { enabled, text, backgroundColor, textColor }`. Documents without it get the defaults (enabled, `FREE DELIVERY ALL OVER PAKISTAN`, ink background, paper text), so existing installs need no migration.
+- Public: `GET /api/site/announcement` returns only those four fields. Admin: Admin > Announcement (`GET/PUT /api/admin/site/announcement`), permissions `site.view` / `site.edit` (the same group as the homepage hero; granted per member under Team). The server validates: plain text up to 120 characters (no `<` or `>`), `#rgb`/`#rrggbb` colours only, and a contrast ratio of at least 4.5:1 between text and background. Visitors see changes within about a minute (browser/API cache); no redeploy.
+
+### Production reliability (what changed and why)
+- The API answered "The database is temporarily unavailable" the instant the MongoDB connection was not in the *connected* state, with no grace period, and the browser never retried. Now: requests wait up to 5 s for a reconnect (`requireDb`), idle pooled sockets are recycled before they die (`maxIdleTimeMS`), start-up retries the first connection 5 times instead of exiting, driver/network errors mid-request are reported as a retryable 503 (not a vague 500), and the browser retries **safe** requests (all GETs, the shipping quote, order-status reads) up to twice with a short back-off. Order creation, logins and all other writes are never retried automatically.
+- A failed admin/storefront session check is no longer treated as "signed out".
+- New `GET /api/healthz` (liveness, always 200 while the process is up). Use it for host health checks and uptime pings; `/api/health` stays the readiness check (503 when the database is down).
+- Set **`TRUST_PROXY=1`** in production (the server warns at start-up if it is missing).
+- Netlify: `client/public/_redirects` (SPA fallback). See the deployment notes in the hand-over report.
+
+## Contact form, policies and visitor numbers
+
+- **Contact form:** `POST /api/contact` saves the message in MongoDB (`contactmessages`); the visitor sees "Message sent" only after it is saved. Admin > **Messages** (permissions `messages.view` / `messages.manage`) lists, searches, marks read/replied, replies by email (opens your mail app) and deletes. The dashboard shows the number of new messages. Protected by validation, a rate limit (5 per 10 minutes per IP) and a hidden honeypot field. No email is sent automatically: check Admin > Messages.
+- **Policies:** the wording is in `client/src/content/policies/{privacy,refund,shipping,terms}.txt` and shown at `/policies/privacy|refund|shipping|terms` (linked in the footer). To change a policy, edit its `.txt` file and redeploy. Supported formatting: `#`/`###` headings, `1. Heading` lines, `- ` lists, `**bold**`, https links and e-mail addresses.
+- **Visitor numbers:** each storefront page view sends one tiny request (`POST /api/analytics/visit`). The server stores only a one-way hash of a random browser id, the day (Pakistan time) and a page-view counter: no IP address, user agent or page path. Crawlers, Do Not Track / Global Privacy Control visitors and admin pages are not counted. Shown on Admin > Dashboard (permission `analytics.view`; the master admin always has it, grant it to sub-admins under Team): today, 7 days, 30 days, all time, plus a 14-day chart. Daily rows expire after 400 days.

@@ -4,7 +4,7 @@ import { allowedNext } from "./orderStatus.js";
 
 export const rowOf = (o) => ({
   id: String(o._id), orderNumber: o.orderNumber, customerName: o.customer?.name || "", customerEmail: o.customer?.email || "",
-  total: o.total, currency: o.currency || "USD", status: o.status, paymentStatus: o.payment?.status || "unpaid",
+  total: o.total, currency: o.currency || "USD", status: o.status, paymentStatus: o.payment?.status || "unpaid", paymentMethod: o.payment?.method || "",
   itemCount: (o.items || []).reduce((n, i) => n + i.quantity, 0), createdAt: o.createdAt,
 });
 

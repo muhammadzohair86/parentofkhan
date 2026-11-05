@@ -23,6 +23,6 @@ export async function quoteCheckout(lines, { country, city }, signal) {
   const { data } = await apiPost("/checkout/quote", {
     items: lines.map((l) => ({ productId: l.productId, color: l.color, size: l.size, quantity: l.qty })),
     destination: { country, city: city || "" },
-  }, signal);
+  }, signal, { retry: true }); // read-only calculation: safe to repeat after a transient failure
   return data;
 }

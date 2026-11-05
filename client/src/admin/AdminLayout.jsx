@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Shirt, Tags, Package, Users, LogOut, Menu, X, ExternalLink, Image as ImageIcon, Mail, Truck } from "lucide-react";
+import { LayoutDashboard, Shirt, Tags, Package, Users, LogOut, Menu, X, ExternalLink, Image as ImageIcon, Mail, Truck, Megaphone, MessageSquare } from "lucide-react";
 import { useAdminAuth, can } from "./useAdminAuth.js";
 import { useModal, useScrollLock, usePhone } from "../hooks/overlay.js";
 
@@ -11,6 +11,8 @@ const NAV = [
   { to: "/admin/orders", label: "Orders", icon: Package, perm: "orders.view" },
   { to: "/admin/shipping", label: "Shipping", icon: Truck, perm: "shipping.view" },
   { to: "/admin/homepage", label: "Homepage", icon: ImageIcon, perm: "site.view" },
+  { to: "/admin/announcement", label: "Announcement", icon: Megaphone, perm: "site.view" },
+  { to: "/admin/messages", label: "Messages", icon: MessageSquare, perm: "messages.view" },
   { to: "/admin/subscribers", label: "Subscribers", icon: Mail, perm: "newsletter.view" },
   { to: "/admin/team", label: "Team", icon: Users, perm: "team.view" },
 ];

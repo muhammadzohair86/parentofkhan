@@ -1,6 +1,7 @@
 import { SiteSetting } from "../models/SiteSetting.js";
 import { FeatureBox } from "../models/FeatureBox.js";
 import { PaymentMethod } from "../models/PaymentMethod.js";
+import { resolveAnnouncement } from "../lib/announcement.js";
 import { DEFAULT_FEATURES, DEFAULT_HERO_ALT, MAX_ACTIVE_FEATURES } from "../lib/siteDefaults.js";
 
 // Public, read-only. Each endpoint exposes only what the storefront renders.
@@ -29,4 +30,11 @@ export async function getPaymentMethods(_req, res) {
   const items = await PaymentMethod.find({ active: true }).sort({ order: 1, _id: 1 }).lean();
   cache(res);
   res.json({ success: true, data: items.map((m) => ({ id: String(m._id), name: m.name, logoUrl: m.logoUrl || null, altText: m.altText || m.name })) });
+}
+
+// Public: ONLY the four fields the bar renders (no timestamps, no other settings).
+export async function getAnnouncement(_req, res) {
+  const doc = await SiteSetting.findOne({ key: "site" }).select("announcement").lean();
+  cache(res);
+  res.json({ success: true, data: resolveAnnouncement(doc?.announcement) });
 }

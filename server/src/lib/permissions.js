@@ -10,7 +10,9 @@ export const PERMISSION_GROUPS = {
   orders: ["view", "update"],
   team: ["view", "manage"],
   newsletter: ["view", "manage"],
-  site: ["view", "edit"], // homepage hero images
+  site: ["view", "edit"], // homepage hero images and the announcement bar
+  messages: ["view", "manage"], // contact-form messages from customers
+  analytics: ["view"], // visitor numbers on the dashboard
   shipping: ["view", "edit"], // NLS Xpress domestic/international shipping settings
 };
 export const ALL_PERMISSIONS = Object.entries(PERMISSION_GROUPS).flatMap(([g, acts]) => acts.map((a) => `${g}.${a}`));

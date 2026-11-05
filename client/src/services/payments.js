@@ -2,7 +2,7 @@
 // from the URL is treated as proof of payment (the server asks Safepay).
 import { apiGet, apiPost } from "./api.js";
 
-// { enabled, provider: "safepay", environment: "sandbox", testMode: true }
+// { enabled (online gateway), provider, environment, testMode, reason, whatsapp: { enabled } }
 export async function getPaymentConfig() {
   const { data } = await apiGet("/payments/config");
   return data;
@@ -14,9 +14,24 @@ export async function startPayment(payload) {
   return data;
 }
 
+// WhatsApp checkout: saves the order on the server FIRST (same pricing/shipping/validation, idempotent via clientRequestId), then returns the wa.me link
+// built from the saved order. -> { orderNumber, total, currency, whatsappUrl, orderPath }. Never retried automatically (the caller decides).
+export async function createWhatsappOrder(payload) {
+  const { data } = await apiPost("/checkout/whatsapp", payload);
+  return data;
+}
+
+// Only ever send the customer to WhatsApp's own click-to-chat host, even if a response were somehow tampered with.
+export function isWhatsappUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && u.hostname === "wa.me" && /^\/\d{8,15}$/.test(u.pathname);
+  } catch { return false; }
+}
+
 // What really happened to an order's payment (the server checks with Safepay). The token is the private link token from the order URL.
 export async function getPaymentStatus(orderNumber, token) {
-  const { data } = await apiPost(`/orders/${encodeURIComponent(orderNumber)}/payment-status`, { token });
+  const { data } = await apiPost(`/orders/${encodeURIComponent(orderNumber)}/payment-status`, { token }, undefined, { retry: true }); // a read: safe to repeat
   return data;
 }
 

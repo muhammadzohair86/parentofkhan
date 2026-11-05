@@ -11,7 +11,9 @@ const STATUSES = ["pending", "confirmed", "processing", "shipped", "delivered", 
 const TONE = { pending: "amber", confirmed: "grey", processing: "grey", shipped: "grey", delivered: "green", cancelled: "red" };
 const PAY_TONE = { paid: "green", unpaid: "amber", failed: "red", refunded: "grey" };
 const LABEL = { processing: "printing" };
-export const StatusBadge = ({ status }) => <Badge tone={TONE[status]}>{LABEL[status] || status}</Badge>;
+// A WhatsApp order that is still "pending" is waiting for the customer's WhatsApp message and our confirmation.
+export const StatusBadge = ({ status, method }) => <Badge tone={TONE[status]}>{method === "whatsapp" && status === "pending" ? "awaiting WhatsApp confirmation" : LABEL[status] || status}</Badge>;
+const METHOD_LABEL = { whatsapp: "WhatsApp (manual payment)", safepay: "Safepay" };
 const sel = "border border-base-300 bg-transparent px-2 py-2 text-sm";
 
 export function OrderList() {
@@ -35,7 +37,7 @@ export function OrderList() {
         <label className="flex items-center gap-2 text-sm">To <input type="date" value={to} min={from || undefined} onChange={(e) => set("to", e.target.value)} className={sel} /></label>
       </div>
       {loading && !rows ? <Loading /> : error ? <Notice tone="error">Could not load orders. {error.message}</Notice> : !rows?.length ? (
-        <Notice>{filtered ? "No orders match these filters." : "No orders yet. Orders will appear here once the storefront checkout (a later phase) starts creating them."}</Notice>
+        <Notice>{filtered ? "No orders match these filters." : "No orders yet. Orders appear here as soon as a customer completes checkout on WhatsApp."}</Notice>
       ) : (
         <div className="overflow-x-auto border border-base-300">
           <table className="w-full min-w-[720px] text-left text-sm">
@@ -46,7 +48,7 @@ export function OrderList() {
                   <td className="p-3"><Link to={`/admin/orders/${o.id}`} className="link-u font-medium">{o.orderNumber}</Link></td>
                   <td className="p-3"><p>{o.customerName}</p><p className="text-xs opacity-60">{o.customerEmail}</p></td>
                   <td className="p-3 whitespace-nowrap">{dateTime(o.createdAt)}</td><td className="p-3">{o.itemCount}</td><td className="p-3 whitespace-nowrap">{money(o.total)}</td>
-                  <td className="p-3"><Badge tone={PAY_TONE[o.paymentStatus]}>{o.paymentStatus}</Badge></td><td className="p-3"><StatusBadge status={o.status} /></td>
+                  <td className="p-3"><Badge tone={PAY_TONE[o.paymentStatus]}>{o.paymentStatus}</Badge>{o.paymentMethod && <p className="mt-1 text-xs opacity-60">{o.paymentMethod === "whatsapp" ? "WhatsApp" : o.paymentMethod}</p>}</td><td className="p-3"><StatusBadge status={o.status} method={o.paymentMethod} /></td>
                 </tr>
               ))}
             </tbody>
@@ -74,6 +76,7 @@ function ShipmentForm({ order, mode, onDone, onCancel }) {
   const set = (k, v) => { setErr(null); setF((x) => ({ ...x, [k]: v })); };
   const dispatch = mode === "dispatch";
   const unpaid = order.payment.status !== "paid";
+  const manual = order.payment.method === "whatsapp";
   const missingTracking = dispatch && !f.trackingNumber.trim();
   const blocked = (missingTracking && !noTracking) || (dispatch && unpaid && !unpaidOk);
 
@@ -113,7 +116,9 @@ function ShipmentForm({ order, mode, onDone, onCancel }) {
       )}
       {dispatch && unpaid && (
         <div className="space-y-2 border border-error p-3 text-sm">
-          <p>This order has <strong>not been paid online</strong> (payment: {order.payment.status}). Abandoned checkouts also look like this.</p>
+          {manual
+            ? <p>This WhatsApp order has <strong>not been marked as paid</strong>. Verify the payment first, then use “Mark payment received” on the order page, or confirm below that payment was received another way.</p>
+            : <p>This order has <strong>not been paid online</strong> (payment: {order.payment.status}). Abandoned checkouts also look like this.</p>}
           <Check label="I have confirmed payment was received another way" checked={unpaidOk} onChange={setUnpaidOk} />
         </div>
       )}
@@ -136,6 +141,9 @@ export function OrderDetail() {
   const [err, setErr] = useState("");
   const [ship, setShip] = useState(null);   // null | "dispatch" | "edit": the courier-details dialog
   const [done, setDone] = useState("");
+  const [payDlg, setPayDlg] = useState(null);  // null | "paid" | "unpaid": manual payment verification (WhatsApp orders)
+  const [payRef, setPayRef] = useState("");
+  const [payNote, setPayNote] = useState("");
   const o = data?.data;
   if (loading && !o) return <Loading />;
   if (error) return <Notice tone="error">{error.status === 404 ? "Order not found." : error.message} <Link to="/admin/orders" className="link-u">Back to orders</Link></Notice>;
@@ -144,6 +152,14 @@ export function OrderDetail() {
     setBusy(true); setErr("");
     try { await A.patch(`/orders/${id}/status`, { status: pending, note }); setPending(null); setNote(""); reload(); }
     catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+  const applyPayment = async () => {
+    setBusy(true); setErr("");
+    try {
+      await A.patch(`/orders/${id}/payment`, { paid: payDlg === "paid", reference: payRef, note: payNote });
+      setPayDlg(null); setPayRef(""); setPayNote(""); setDone(payDlg === "paid" ? "Payment recorded as received." : "Payment reverted to not paid."); reload();
+    } catch (e) { setErr(e.details?.length ? e.details.map((x) => x.message).join(" ") : e.message); }
     finally { setBusy(false); }
   };
   const canUpdate = can(user, "orders.update");
@@ -192,9 +208,17 @@ export function OrderDetail() {
         <div className="space-y-6">
           <section className="space-y-3 border border-base-300 p-4 text-sm">
             <p className="eyebrow opacity-70">Status</p>
-            <div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} /><Badge tone={PAY_TONE[o.payment.status]}>payment: {o.payment.status}</Badge></div>
-            {o.payment.method && <p className="text-xs opacity-70">Payment method: {o.payment.method}{o.payment.environment === "sandbox" ? " (sandbox: test payment, not real money)" : ""}{o.payment.reference ? ` (${o.payment.reference})` : ""}{o.payment.paidAt ? ` · paid ${new Date(o.payment.paidAt).toLocaleString()}` : ""}</p>}
+            <div className="flex flex-wrap items-center gap-2"><StatusBadge status={o.status} method={o.payment.method} /><Badge tone={PAY_TONE[o.payment.status]}>payment: {o.payment.status}</Badge></div>
+            {o.payment.method && <p className="text-xs opacity-70">Payment method: {METHOD_LABEL[o.payment.method] || o.payment.method}{o.payment.environment === "sandbox" ? " (sandbox: test payment, not real money)" : ""}{o.payment.reference ? ` (${o.payment.reference})` : ""}{o.payment.paidAt ? ` · paid ${new Date(o.payment.paidAt).toLocaleString()}` : ""}</p>}
             <p className="text-xs opacity-60">Changing the order status never marks it as paid.</p>
+            {o.payment.method === "whatsapp" && (
+              <div className="space-y-2 border-t border-base-300 pt-3">
+                <p className="text-xs opacity-70">WhatsApp order: the customer pays by the instructions you send them. Nothing here is marked paid automatically, even after they message you. Mark it paid only after you have verified the payment.</p>
+                {canUpdate && o.status !== "cancelled" && (o.payment.status === "unpaid"
+                  ? <button className={btnSm} onClick={() => { setErr(""); setDone(""); setPayDlg("paid"); }}>Mark payment received</button>
+                  : o.payment.status === "paid" ? <button className={`${btnSm} !border-error !text-error`} onClick={() => { setErr(""); setDone(""); setPayDlg("unpaid"); }}>Undo: mark as not paid</button> : null)}
+              </div>
+            )}
             {canUpdate && o.allowedNext.length > 0 && (
               <div className="space-y-2 border-t border-base-300 pt-3">
                 <label className="block"><span className="eyebrow mb-1 block">Note (optional)</span><textarea className="field !py-2" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} /></label>
@@ -229,6 +253,12 @@ export function OrderDetail() {
       <Modal open={!!ship} title={ship === "dispatch" ? `Mark ${o.orderNumber} as shipped` : "Shipment details"} onClose={() => setShip(null)}>
         {ship && <ShipmentForm key={ship} order={o} mode={ship} onCancel={() => setShip(null)} onDone={(msg) => { setShip(null); setDone(msg); reload(); }} />}
       </Modal>
+      <Confirm open={!!payDlg} title={payDlg === "paid" ? "Mark payment received?" : "Mark as not paid?"} busy={busy} error={err} confirmLabel="Confirm"
+        message={payDlg === "paid" ? `Confirm you have verified payment for ${o.orderNumber} (${money(o.total)} ${o.currency}). This is recorded in the order history with your name.` : `Revert ${o.orderNumber} to not paid? Use this only to correct a mistake. It is recorded in the history.`}
+        onConfirm={applyPayment} onCancel={() => setPayDlg(null)}>
+        {payDlg === "paid" && <Field label="Payment reference (optional)" hint="e.g. a bank transfer or wallet transaction ID. Admin-only; never shown to the customer."><input className="field" maxLength={80} value={payRef} onChange={(e) => setPayRef(e.target.value)} /></Field>}
+        <Field label="Note (optional, admin-only)"><input className="field" maxLength={300} value={payNote} onChange={(e) => setPayNote(e.target.value)} /></Field>
+      </Confirm>
       <Confirm open={!!pending} title="Update order status?" busy={busy} error={err} confirmLabel="Confirm"
         message={pending ? `Move ${o.orderNumber} from “${LABEL[o.status] || o.status}” to “${LABEL[pending] || pending}”?${pending === "cancelled" ? " Cancelled orders cannot be reopened." : ""}` : ""}
         onConfirm={apply} onCancel={() => setPending(null)} />

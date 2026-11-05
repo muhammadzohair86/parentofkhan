@@ -59,6 +59,12 @@ export async function getHero() {
   return data;
 }
 
+// Announcement bar: { enabled, text, backgroundColor, textColor } (the server falls back to the defaults when nothing was saved).
+export async function getAnnouncement() {
+  const { data } = await apiGet("/site/announcement");
+  return data;
+}
+
 export async function getFeatures() {
   const { data } = await apiGet("/site/features");
   return data;

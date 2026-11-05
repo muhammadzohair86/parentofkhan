@@ -5,7 +5,7 @@ import { A } from "./adminApi.js";
 import { useAdminAuth, can } from "./useAdminAuth.js";
 import { PageHeader, Loading, Notice, Badge, Modal, Field, Check, btnSm, dateTime, useReload } from "./ui.jsx";
 
-const GROUP_LABEL = { products: "Products", categories: "Categories", orders: "Orders", team: "Team", newsletter: "Newsletter subscribers", site: "Homepage (hero images)", shipping: "Shipping settings" };
+const GROUP_LABEL = { products: "Products", categories: "Categories", orders: "Orders", team: "Team", newsletter: "Newsletter subscribers", site: "Homepage hero & announcement bar", shipping: "Shipping settings", messages: "Contact messages", analytics: "Visitor numbers (dashboard)" };
 const ACTION_LABEL = { view: "View", create: "Create", edit: "Edit", delete: "Delete", update: "Update status", manage: "Manage" };
 
 // Permission checkboxes. Anything the signed-in admin cannot grant is disabled (the server enforces the same rule).

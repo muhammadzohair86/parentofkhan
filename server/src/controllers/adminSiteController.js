@@ -1,5 +1,6 @@
 import { SiteSetting } from "../models/SiteSetting.js";
 import { releaseImages } from "../lib/media.js";
+import { resolveAnnouncement, ANNOUNCEMENT_DEFAULTS } from "../lib/announcement.js";
 import { DEFAULT_HERO_ALT } from "../lib/siteDefaults.js";
 
 const shape = (doc) => ({
@@ -28,4 +29,27 @@ export async function updateHeroSettings(req, res) {
   }
   await releaseImages([before?.hero?.desktopImage, before?.hero?.mobileImage]); // replaced images are deleted only if unused elsewhere
   res.json({ success: true, data: shape(doc) });
+}
+
+// ---- Announcement bar ----
+const announcementShape = (doc) => ({ ...resolveAnnouncement(doc?.announcement), defaults: ANNOUNCEMENT_DEFAULTS, saved: !!doc?.announcement, updatedAt: doc?.announcement ? doc.updatedAt : null });
+
+export async function getAnnouncementSettings(_req, res) {
+  const doc = await SiteSetting.findOne({ key: "site" }).lean();
+  res.set("Cache-Control", "no-store");
+  res.json({ success: true, data: announcementShape(doc) });
+}
+
+export async function updateAnnouncementSettings(req, res) {
+  const d = req.validated.body; // already validated and normalised (lib/announcement.js); only these four fields can be written
+  const update = { $set: { announcement: { enabled: d.enabled, text: d.text, backgroundColor: d.backgroundColor, textColor: d.textColor } } };
+  const opts = { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true };
+  let doc;
+  try {
+    doc = await SiteSetting.findOneAndUpdate({ key: "site" }, update, opts).lean();
+  } catch (e) {
+    if (e?.code !== 11000) throw e;
+    doc = await SiteSetting.findOneAndUpdate({ key: "site" }, update, opts).lean(); // two first-time saves raced: the second just updates
+  }
+  res.json({ success: true, data: announcementShape(doc) });
 }

@@ -8,16 +8,19 @@ import { adminLogin, adminMe, changeOwnPassword } from "../controllers/adminAuth
 import { dashboard } from "../controllers/adminDashboardController.js";
 import { listProducts, getProduct, createProduct, updateProduct, deleteProduct } from "../controllers/adminProductController.js";
 import { listCategories, categoryOptions, createCategory, updateCategory, deleteCategory } from "../controllers/adminCategoryController.js";
-import { listOrders, getOrder, updateOrderStatus, updateOrderShipment } from "../controllers/adminOrderController.js";
+import { listOrders, getOrder, updateOrderStatus, updateOrderShipment, updateOrderPayment } from "../controllers/adminOrderController.js";
 import { listTeam, createMember, updateMember } from "../controllers/adminTeamController.js";
 import { uploadImage, uploadConfig } from "../controllers/adminUploadController.js";
-import { getHeroSettings, updateHeroSettings } from "../controllers/adminSiteController.js";
+import { getHeroSettings, updateHeroSettings, getAnnouncementSettings, updateAnnouncementSettings } from "../controllers/adminSiteController.js";
 import { listSubscribers, updateSubscriber, deleteSubscriber, exportSubscribers } from "../controllers/adminSubscriberController.js";
 import { idParams, listSubscribersQuery, updateSubscriberBody, exportSubscribersQuery } from "../validators/adminValidators.js";
 import { productCreateBody, productPatchBody, listAdminProductsQuery } from "../validators/adminProductValidators.js";
 import { categoryCreateBody, categoryPatchBody, deleteCategoryQuery } from "../validators/adminCategoryValidators.js";
 import { listOrdersQuery, updateOrderStatusBody, updateOrderShipmentBody } from "../validators/adminOrderValidators.js";
-import { heroBody } from "../validators/adminSiteValidators.js";
+import { updateOrderPaymentBody } from "../validators/adminOrderPaymentValidators.js";
+import { listMessages, updateMessage, deleteMessage } from "../controllers/adminMessageController.js";
+import { listMessagesQuery, updateMessageBody } from "../validators/contactValidators.js";
+import { heroBody, announcementBody } from "../validators/adminSiteValidators.js";
 import { mountShippingAdmin } from "./shippingAdminRoutes.js";
 import { teamCreateBody, teamPatchBody, changePasswordBody, adminLoginBody } from "../validators/adminTeamValidators.js";
 
@@ -67,6 +70,10 @@ export default function adminRoutes({ isProd, clientOrigins, uploadMaxBytes }) {
   r.get("/site/hero", requirePermission("site.view"), asyncHandler(getHeroSettings));
   r.put("/site/hero", requirePermission("site.edit"), validate({ body: heroBody }), asyncHandler(updateHeroSettings));
 
+  // Announcement bar (same permissions as the homepage settings: site.view / site.edit)
+  r.get("/site/announcement", requirePermission("site.view"), asyncHandler(getAnnouncementSettings));
+  r.put("/site/announcement", requirePermission("site.edit"), validate({ body: announcementBody }), asyncHandler(updateAnnouncementSettings));
+
   // Shipping settings (domestic + international destinations): routes and their permission checks live in shippingAdminRoutes.js
   mountShippingAdmin(r);
 
@@ -76,10 +83,17 @@ export default function adminRoutes({ isProd, clientOrigins, uploadMaxBytes }) {
   r.patch("/orders/:id/status", requirePermission("orders.update"), validate({ params: idParams, body: updateOrderStatusBody }), asyncHandler(updateOrderStatus));
   r.patch("/orders/:id/shipment", requirePermission("orders.update"), validate({ params: idParams, body: updateOrderShipmentBody }), asyncHandler(updateOrderShipment));
 
+  r.patch("/orders/:id/payment", requirePermission("orders.update"), validate({ params: idParams, body: updateOrderPaymentBody }), asyncHandler(updateOrderPayment));
+
   // Team
   r.get("/team", requirePermission("team.view"), asyncHandler(listTeam));
   r.post("/team", requirePermission("team.manage"), validate({ body: teamCreateBody }), asyncHandler(createMember));
   r.patch("/team/:id", requirePermission("team.manage"), validate({ params: idParams, body: teamPatchBody }), asyncHandler(updateMember));
+
+  // Contact-form messages
+  r.get("/messages", requirePermission("messages.view"), validate({ query: listMessagesQuery }), asyncHandler(listMessages));
+  r.patch("/messages/:id", requirePermission("messages.manage"), validate({ params: idParams, body: updateMessageBody }), asyncHandler(updateMessage));
+  r.delete("/messages/:id", requirePermission("messages.manage"), validate({ params: idParams }), asyncHandler(deleteMessage));
 
   // Newsletter subscribers (API from the previous phase, now permission-based)
   r.get("/subscribers/export", requirePermission("newsletter.view"), validate({ query: exportSubscribersQuery }), asyncHandler(exportSubscribers));

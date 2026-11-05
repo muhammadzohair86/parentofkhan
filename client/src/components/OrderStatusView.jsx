@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import OrderDetails from "./OrderDetails.jsx";
 import { useCart } from "../store/useCart.js";
 import { useTitle } from "../hooks/useAsync.js";
-import { isSafepayUrl } from "../services/payments.js";
+import { isSafepayUrl, isWhatsappUrl } from "../services/payments.js";
 import { money } from "../lib.js";
 
 // Shows what really happened to an order's payment, plus the order itself (items, totals, delivery, history). Used for the private order link
@@ -84,9 +84,14 @@ export default function OrderStatusView({ loader, retryer, cancelledHint = false
   }
   if (!data) return <Shell><h1 className="font-display text-5xl md:text-6xl">Order status</h1><p role="status" className="mt-6 text-sm opacity-70">Checking your payment…</p></Shell>;
 
-  const waitedOut = status === "pending" && polls >= MAX_POLLS;
-  const c = COPY[status] || COPY.pending;
-  const showRetry = data.canRetry || (status === "pending" && (cancelledHint || waitedOut));
+  const wa = data.paymentMethod === "whatsapp"; // WhatsApp order: paid and confirmed by hand, so there is no online payment to poll or retry
+  const waCancelled = data.order?.status === "cancelled";
+  const waCopy = status === "paid" ? COPY.paid
+    : waCancelled ? { title: "This order was cancelled", body: "This order was cancelled. If you think this is a mistake, please contact us with your order reference below." }
+    : { title: "Your order is saved", body: "Almost done: send the pre-filled WhatsApp message so we can confirm your order and share payment instructions. Your order isn't confirmed or paid until we reply." };
+  const waitedOut = !wa && status === "pending" && polls >= MAX_POLLS;
+  const c = wa ? waCopy : COPY[status] || COPY.pending;
+  const showRetry = !wa && (data.canRetry || (status === "pending" && (cancelledHint || waitedOut)));
   const pendingTitle = status === "pending" && cancelledHint ? "You left the payment page" : c.title;
   const pendingBody = status === "pending" && cancelledHint
     ? "Your payment hasn't been taken yet. You can go back to Safepay to finish paying, and your order is saved."
@@ -101,17 +106,20 @@ export default function OrderStatusView({ loader, retryer, cancelledHint = false
       {!data.order && <dl className="mt-8 space-y-2 border border-base-300 p-5 text-sm">
         <div className="flex justify-between gap-6"><dt className="opacity-60">Order reference</dt><dd className="font-medium">{data.orderNumber}</dd></div>
         <div className="flex justify-between gap-6"><dt className="opacity-60">Total</dt><dd>{money(data.total)} {data.currency}</dd></div>
-        <div className="flex justify-between gap-6"><dt className="opacity-60">Payment</dt><dd className="capitalize">{status === "pending" ? "Awaiting confirmation" : status === "review" ? "Under review" : status}</dd></div>
+        <div className="flex justify-between gap-6"><dt className="opacity-60">Payment</dt><dd className="capitalize">{wa && status === "unpaid" ? "Awaiting payment instructions" : status === "pending" ? "Awaiting confirmation" : status === "review" ? "Under review" : status}</dd></div>
       </dl>}
 
       {data.testMode && <p className="mt-4 text-xs opacity-70">Test mode: payments use Safepay's sandbox, so no real money is charged and this is not a real order.</p>}
-      {data.verificationDelayed && status !== "paid" && <p role="status" className="mt-4 text-sm">We couldn't confirm with Safepay just now. Please check again in a moment.</p>}
+      {wa && !waCancelled && status !== "paid" && <p className="mt-3 text-xs opacity-70">If WhatsApp didn’t open, use the button below. We only know you’ve contacted us once we receive your message.</p>}
+      {!wa && data.verificationDelayed && status !== "paid" && <p role="status" className="mt-4 text-sm">We couldn't confirm with Safepay just now. Please check again in a moment.</p>}
       {view.phase === "error" && <p role="alert" className="mt-4 text-sm text-error">We couldn't refresh your status. {" "}<button className="link-u" onClick={checkAgain}>Try again</button></p>}
       {retryError && <p role="alert" className="mt-4 text-sm text-error">{retryError}</p>}
 
       <div className="mt-8 flex flex-wrap items-center gap-4">
         {showRetry && <button className="btn-khan" disabled={retrying} onClick={retry}>{retrying ? "Opening Safepay…" : status === "pending" ? "Return to payment" : "Try payment again"}</button>}
-        {(status === "pending" || waitedOut) && <button className="link-u text-sm" onClick={checkAgain}>Check again</button>}
+        {wa && data.whatsappUrl && isWhatsappUrl(data.whatsappUrl) && <a className="btn-khan" href={data.whatsappUrl} target="_blank" rel="noopener noreferrer">Open WhatsApp</a>}
+        {!wa && (status === "pending" || waitedOut) && <button className="link-u text-sm" onClick={checkAgain}>Check again</button>}
+        {wa && status !== "paid" && <button className="link-u text-sm" onClick={checkAgain}>Refresh status</button>}
         {status === "paid" ? <Link to="/shop" className="btn-khan">Continue shopping</Link> : <Link to="/shop" className="link-u text-sm">Back to the shop</Link>}
       </div>
       <OrderDetails order={data.order} />

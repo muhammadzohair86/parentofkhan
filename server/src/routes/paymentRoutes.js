@@ -8,14 +8,17 @@ import { lookupBody } from "../validators/orderValidators.js";
 import { paymentHandlers } from "../controllers/paymentController.js";
 
 // Customer-facing payment routes (all behind requireDb + requireSameOrigin in app.js).
-export function paymentRoutes({ service, orderAccess, info, isProd }) {
-  const h = paymentHandlers(service, info, orderAccess);
+export function paymentRoutes({ service, orderAccess, info, isProd, whatsapp = null }) {
+  const h = paymentHandlers(service, info, orderAccess, whatsapp);
 
   const config = Router();                       // mounted at /api/payments
   config.get("/config", asyncHandler(h.config));
 
   const checkout = Router();                     // mounted at /api/checkout (next to the existing /quote)
   checkout.post("/pay", limiter(60_000, 10, {}, "Too many payment attempts. Please wait a minute and try again."), optionalAuth(isProd), validate({ body: payBody }), asyncHandler(h.pay));
+
+  // WhatsApp checkout (the only customer checkout while online gateways are off). Idempotent via clientRequestId.
+  if (whatsapp) checkout.post("/whatsapp", limiter(60_000, 10, {}, "Too many order attempts. Please wait a minute and try again."), optionalAuth(isProd), validate({ body: payBody }), asyncHandler(h.whatsapp));
 
   const orders = Router();                       // mounted at /api/orders
   // Guest lookup: the IP limiter here is the coarse layer; the per-order-reference throttle in orderAccessService is the fine one.

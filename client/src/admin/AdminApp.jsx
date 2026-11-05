@@ -12,13 +12,22 @@ import Team from "./Team.jsx";
 import SiteHero from "./SiteHero.jsx";
 import Subscribers from "./Subscribers.jsx";
 import Shipping from "./Shipping.jsx";
+import Announcement from "./Announcement.jsx";
+import Messages from "./Messages.jsx";
 import { Loading, Notice } from "./ui.jsx";
 
 // Redirects visitors without a session to the login screen.
 function RequireSession() {
-  const { user, ready } = useAdminAuth();
+  const { user, ready, initError, init } = useAdminAuth();
   const loc = useLocation();
   if (!ready) return <Loading label="Checking your session…" />;
+  // The session check itself failed (server unreachable/starting up): say so and offer a retry instead of pretending the admin is signed out.
+  if (initError) return (
+    <div className="mx-auto max-w-lg p-10">
+      <Notice tone="error">We couldn’t check your session. {initError.message}</Notice>
+      <button className="btn-khan mt-4" onClick={() => init()}>Try again</button>
+    </div>
+  );
   if (!user) return <Navigate to="/admin/login" replace state={{ from: loc.pathname + loc.search }} />;
   return <AdminLayout />;
 }
@@ -50,7 +59,9 @@ export default function AdminApp() {
         <Route path="orders" element={<Need perm="orders.view"><OrderList /></Need>} />
         <Route path="orders/:id" element={<Need perm="orders.view"><OrderDetail /></Need>} />
         <Route path="homepage" element={<Need perm="site.view"><SiteHero /></Need>} />
+        <Route path="announcement" element={<Need perm="site.view"><Announcement /></Need>} />
         <Route path="shipping" element={<Need perm="shipping.view"><Shipping /></Need>} />
+        <Route path="messages" element={<Need perm="messages.view"><Messages /></Need>} />
         <Route path="subscribers" element={<Need perm="newsletter.view"><Subscribers /></Need>} />
         <Route path="team" element={<Need perm="team.view"><Team /></Need>} />
         <Route path="*" element={<Notice>That admin page does not exist.</Notice>} />

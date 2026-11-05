@@ -3,17 +3,23 @@ import { apiGet, apiPost } from "../services/api.js";
 
 // Auth state mirrors the server session; the browser only holds an HttpOnly cookie it cannot read.
 // Nothing sensitive is kept in localStorage.
+let inflight = null; // one session check at a time (React StrictMode / several callers)
 export const useAuth = create((set, get) => ({
   user: null,
   ready: false, // true once we have asked the server who we are
+  initFailed: false, // the last check could not reach the server (we do NOT know the visitor is signed out): init() may run again
   async init() {
-    if (get().ready) return;
-    try {
-      const { data } = await apiGet("/auth/me");
-      set({ user: data, ready: true });
-    } catch {
-      set({ user: null, ready: true });
-    }
+    const s = get();
+    if ((s.ready && !s.initFailed) || inflight) return inflight ?? undefined;
+    inflight = (async () => {
+      try {
+        const { data } = await apiGet("/auth/me"); // anonymous visitors get a normal 200 with data: null
+        set({ user: data, ready: true, initFailed: false });
+      } catch {
+        set({ user: null, ready: true, initFailed: true }); // a failed check is not "signed out"; it is retried on the next init()
+      } finally { inflight = null; }
+    })();
+    return inflight;
   },
   async signup(fields) {
     const { data } = await apiPost("/auth/signup", fields);

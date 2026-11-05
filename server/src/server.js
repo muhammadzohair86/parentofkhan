@@ -11,6 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { paymentRepo } from "./lib/paymentRepo.js";
 import { createOrderAccessService } from "./lib/orderAccessService.js";
+import { createWhatsappCheckout } from "./lib/whatsappCheckout.js";
 import dns from 'dns';
 
 dns.setServers(['8.8.8.8', '8.8.4.4']);
@@ -59,9 +60,14 @@ try {
 const media = await initMedia(env);
 console.log(`[media] image storage: ${media.provider}`);
 
-// Safepay (sandbox). Log WHICH settings are wrong by name only; never print a value.
+// ---- Online payment gateway (Safepay sandbox): kept in the code, OFF unless ENABLE_ONLINE_PAYMENTS=true ----
+// Current phase: WhatsApp checkout only. With the switch off no Safepay client exists, so no payment session can be started, no sandbox
+// payment can run and no webhook is processed. Nothing is deleted: set ENABLE_ONLINE_PAYMENTS=true (plus the SAFEPAY_* variables) to bring it back.
 const sp = env.safepay;
-if (sp.status === "enabled") {
+const gatewaysOn = env.onlinePaymentsEnabled && sp.status === "enabled";
+if (!env.onlinePaymentsEnabled) {
+  console.log("[payments] Online payment gateways are DISABLED (WhatsApp checkout only). Safepay code is preserved; set ENABLE_ONLINE_PAYMENTS=true to re-enable it.");
+} else if (sp.status === "enabled") {
   console.log(`[safepay] SANDBOX payments enabled (test mode: no real money moves).${sp.warnings.map((w) => `\n[safepay] warning: ${w}`).join("")}`);
 } else {
   // Say WHERE we looked: the usual causes are a wrong folder, a wrong file name, or editing .env without restarting (npm run dev does not reload it).
@@ -69,15 +75,33 @@ if (sp.status === "enabled") {
   const header = sp.status === "disabled" ? "online payment is OFF: no Safepay credentials were found." : "NOT enabled because of configuration problems:";
   console.error(`[safepay] ${header}\n${sp.problems.map((p) => `  - ${p}`).join("\n")}\n  - working directory: ${process.cwd()} (.env ${fs.existsSync(envFile) ? "found there" : "NOT found there"})\n  - to test your setup without checkout: npm run check:safepay  (add :live to call the Safepay sandbox)${sp.warnings.map((w) => `\n[safepay] warning: ${w}`).join("")}`);
 }
-const safepayClient = sp.status === "enabled" ? createSafepayClient(sp.config) : null;
+const safepayClient = gatewaysOn ? createSafepayClient(sp.config) : null;
+
+// ---- WhatsApp Click-to-Chat checkout (free wa.me links; never invents a number) ----
+const wa = env.whatsapp;
+if (wa.status === "ready") console.log("[whatsapp] WhatsApp checkout enabled.");
+else console.error(`[whatsapp] WhatsApp checkout is OFF: ${wa.status === "invalid" ? wa.problem : "WHATSAPP_BUSINESS_NUMBER is not set. Set it to your WhatsApp Business number in international digits-only format (e.g. 923001234567)."}`);
+const whatsapp = createWhatsappCheckout({ repo: paymentRepo, priceCart: quoteCheckout, number: wa.status === "ready" ? wa.number : null });
+
+if (env.isProd && env.trustProxy === undefined) {
+  console.warn("[server] TRUST_PROXY is not set. Behind a host's load balancer every visitor then looks like one IP, so the rate limits (300 requests/min, 10 login failures/15 min) are shared by ALL visitors. Set TRUST_PROXY=1.");
+}
+
 const paymentService = createPaymentService({
-  repo: paymentRepo, safepay: safepayClient, config: sp.config, publicSiteUrl: env.publicSiteUrl,
+  repo: paymentRepo, safepay: safepayClient, config: gatewaysOn ? sp.config : null, publicSiteUrl: env.publicSiteUrl,
   diagnostics: !env.isProd, // development: provider errors carry a short secret-free reason
   priceCart: quoteCheckout, // the same server-side pricing the quote endpoint uses (also rejects browser-sent amounts that differ)
+  whatsappLink: whatsapp.linkFor,
   log: (event, fields) => console.error(`[payments] ${event} ${JSON.stringify(fields)}`), // fields are ids/states only, never secrets or customer data
 });
 const orderAccess = createOrderAccessService({ repo: paymentRepo, log: (event, fields) => console.error(`[orders] ${event} ${JSON.stringify(fields)}`) });
-const payments = { service: paymentService, orderAccess, info: publicPaymentInfo(sp, { diagnostics: !env.isProd }) };
+// What the browser may know. `enabled` = online gateway; `whatsapp.enabled` = WhatsApp checkout. Never a key, secret or the number itself.
+const info = {
+  ...publicPaymentInfo(env.onlinePaymentsEnabled ? sp : { status: "disabled" }, { diagnostics: !env.isProd }),
+  ...(env.onlinePaymentsEnabled ? {} : { reason: "gateways_disabled" }),
+  whatsapp: { enabled: whatsapp.enabled },
+};
+const payments = { service: paymentService, orderAccess, info, whatsapp };
 
 const server = createApp({ ...env, payments }).listen(env.port, () => console.log(`[server] API listening on http://localhost:${env.port}/api`));
 server.on("error", (e) => {

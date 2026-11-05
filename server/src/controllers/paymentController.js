@@ -1,13 +1,19 @@
 // HTTP layer for payments. All the logic lives in lib/paymentService.js.
 const noStore = (res) => res.set("Cache-Control", "no-store");
 
-export const paymentHandlers = (service, info, orderAccess) => ({
+export const paymentHandlers = (service, info, orderAccess, whatsapp = null) => ({
   // GET /api/payments/config : what the browser may know (never any key or secret)
   config: (_req, res) => { noStore(res); res.json({ success: true, data: info }); },
 
   // POST /api/checkout/pay : create the unpaid order + Safepay session, return the hosted-checkout URL
   pay: async (req, res) => {
     const data = await service.startCheckout(req.validated.body, { userId: req.user?._id ?? null });
+    noStore(res); res.json({ success: true, data });
+  },
+
+  // POST /api/checkout/whatsapp : save the order, then return the wa.me link built from the SAVED order (no payment session, nothing marked paid)
+  whatsapp: async (req, res) => {
+    const data = await whatsapp.start(req.validated.body, { userId: req.user?._id ?? null });
     noStore(res); res.json({ success: true, data });
   },
 
